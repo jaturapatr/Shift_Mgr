@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shift_manager"
+version = "0.1.0"
+description = "A Python project for roster and shift management."
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "ortools>=9.8",
+    "streamlit>=1.30",
+    "pydantic>=2.0",
+    "requests>=2.31",
+    "pandas>=2.0",
+    "plotly>=5.18"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "isort",
+    "mypy"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

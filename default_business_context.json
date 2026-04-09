@@ -1,0 +1,38 @@
+[
+    {
+        "id": "POL_01",
+        "company_id": "COMP_01",
+        "natural_language": "Operate 24/7",
+        "is_active": true
+    },
+    {
+        "id": "POL_02",
+        "company_id": "COMP_01",
+        "natural_language": "Every employee must have exactly 1 day-off per week",
+        "is_active": true
+    },
+    {
+        "id": "POL_03",
+        "company_id": "COMP_01",
+        "natural_language": "Employee must have rest period over 8 hrs a day",
+        "is_active": true
+    },
+    {
+        "id": "POL_05",
+        "company_id": "COMP_01",
+        "natural_language": "Exactly 1 cashier and at least 2 services in one shift",
+        "is_active": true
+    },
+    {
+        "id": "POL_06",
+        "company_id": "COMP_01",
+        "natural_language": "Employee prefer 8 hours shift. Strong penalty for 12 hours shifts.",
+        "is_active": true
+    },
+    {
+        "id": "POL_07",
+        "company_id": "COMP_01",
+        "natural_language": "No repeated Shift pattern on consecutive days (e.g. if A work 00:00-08:00 on Mon, they shouldn't work same shift on Tue).",
+        "is_active": true
+    }
+]

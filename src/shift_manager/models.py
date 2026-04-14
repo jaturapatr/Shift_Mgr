@@ -14,6 +14,7 @@ class ConstraintPrimitive(str, Enum):
     GROUP_BALANCING = "GROUP_BALANCING"
     OBJECTIVE_WEIGHT = "OBJECTIVE_WEIGHT"
     NO_REPEATED_SHIFT = "NO_REPEATED_SHIFT"
+    PREFERENCE = "PREFERENCE"
 
 class ConstraintOp(str, Enum):
     EQ = "=="
@@ -23,6 +24,11 @@ class ConstraintOp(str, Enum):
 class ConstraintUnit(str, Enum):
     BLOCKS = "BLOCKS"
     DAYS = "DAYS"
+
+class ConstraintTargetType(str, Enum):
+    EMPLOYEE = "EMPLOYEE"
+    TEAM = "TEAM"
+    GLOBAL = "GLOBAL"
 
 class Company(BaseModel):
     id: str
@@ -42,6 +48,7 @@ class ContextRule(BaseModel):
 
 class MachineConstraint(BaseModel):
     primitive: ConstraintPrimitive
+    target_type: ConstraintTargetType = ConstraintTargetType.GLOBAL
     company_id: str
     policy_id: Optional[str] = None
     is_temporary: bool = False
@@ -58,6 +65,10 @@ class MachineConstraint(BaseModel):
     op: Optional[ConstraintOp] = None
     value: Optional[int] = None
     weight: Optional[int] = None 
+    
+    # Preference / Relational fields
+    related_employee_id: Optional[str] = None
+    preference_type: Optional[str] = None # e.g. "AVOID_TOGETHER", "MUST_TOGETHER", "AVOID_SHIFT"
 
 class Employee(BaseModel):
     id: str

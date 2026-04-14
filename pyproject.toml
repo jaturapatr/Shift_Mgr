@@ -14,7 +14,8 @@ dependencies = [
     "pydantic>=2.0",
     "requests>=2.31",
     "pandas>=2.0",
-    "plotly>=5.18"
+    "plotly>=5.18",
+    "python-dotenv>=1.0.0"
 ]
 
 [project.optional-dependencies]

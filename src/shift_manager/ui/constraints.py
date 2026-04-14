@@ -1,19 +1,35 @@
 import streamlit as st
 import pandas as pd
 import json
+import os
 from typing import List
 from shift_manager.models import ConstraintPrimitive, MachineConstraint
 from shift_manager.manager import BusinessManager
-from shift_manager.translator import GemmaTranslator
+from shift_manager.translator import GemmaTranslator, LLMTranslator
 
 def render_constraint_management(mgr: BusinessManager, company_id: str, context: List, all_constraints: List):
     """Render the simplified Intent-Based Constraint Management page."""
     st.header("🧠 Logic Command Center")
     st.write("Manage your scheduling rules using natural language.")
     
-    translator = GemmaTranslator()
+    # --- 0. TRANSLATOR SELECTION ---
+    with st.sidebar:
+        st.divider()
+        st.header("🤖 Model Selection")
+        llm_type = st.radio(
+            "Translator Engine",
+            ["Cloud LLM (OpenAI-compatible)", "Local SLM (Gemma:2b)"],
+            index=0 if os.getenv("LLM_API_KEY") else 1,
+            help="Cloud LLM requires .env configuration. Local SLM requires Ollama running."
+        )
+        
+        if llm_type.startswith("Cloud"):
+            translator = LLMTranslator()
+        else:
+            translator = GemmaTranslator()
+
     employees = mgr.load_employees(company_id)
-    emp_ids = [e.id for e in employees]
+    teams = mgr.get_teams(company_id)
 
     # --- 1. SINGLE COMMAND INPUT ---
     with st.container(border=True):
@@ -26,7 +42,7 @@ def render_constraint_management(mgr: BusinessManager, company_id: str, context:
         if st.button("🪄 Process Instruction", type="primary"):
             if user_input:
                 with st.spinner("Analyzing intent and checking for conflicts..."):
-                    result = translator.manage_logic(user_input, all_constraints, emp_ids, company_id)
+                    result = translator.manage_logic(user_input, all_constraints, employees, teams, company_id)
                     st.session_state.logic_preview = result
             else:
                 st.warning("Please enter an instruction first.")
@@ -72,7 +88,7 @@ def render_constraint_management(mgr: BusinessManager, company_id: str, context:
                 
                 # Save
                 with open(mgr.constraint_path, "w") as f:
-                    json.dump([c.model_dump() for c in all_constraints], f, indent=4)
+                    json.dump([c.model_dump(exclude_none=True, exclude_defaults=True) for c in all_constraints], f, indent=4)
                 
                 st.success("Logic stack updated!")
                 del st.session_state.logic_preview
@@ -98,7 +114,7 @@ def render_constraint_management(mgr: BusinessManager, company_id: str, context:
                 if col_btn.button("🗑️", key=f"del_{idx}", help="Remove this rule"):
                     all_constraints.pop(idx)
                     with open(mgr.constraint_path, "w") as f:
-                        json.dump([con.model_dump() for con in all_constraints], f, indent=4)
+                        json.dump([con.model_dump(exclude_none=True, exclude_defaults=True) for con in all_constraints], f, indent=4)
                     st.rerun()
                 
                 # Hidden technical details

@@ -276,7 +276,7 @@ class BusinessManager:
             tc.company_id = company_id
             final.append(tc)
         with open(self.constraint_path, "w") as f:
-            json.dump([c.model_dump() for c in final], f, indent=4)
+            json.dump([c.model_dump(exclude_none=True) for c in final], f, indent=4)
 
     # ============================================
     # SCHEDULE & LEAVE

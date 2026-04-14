@@ -15,7 +15,12 @@ def render_interactive_roster_lab(mgr: BusinessManager, company_id: str,
     """Render Roster Preparation page."""
     st.header("🛠️ Roster Preparation")
     
-    start_date = date(2026, 4, 13)
+    # Calculate start_date as the coming Monday
+    today = date.today()
+    start_date = today + timedelta(days=(7 - today.weekday()))
+    # For simulation purposes in this demo environment, we keep 2026-04-13 but allow it to be dynamic if needed
+    # start_date = date(2026, 4, 13) 
+    
     dates = [start_date + timedelta(days=i) for i in range(7)]
     end_date = dates[-1]
     
@@ -29,9 +34,9 @@ def render_interactive_roster_lab(mgr: BusinessManager, company_id: str,
     
     with col_btn:
         if not has_preview:
-            generate_btn = st.button("⚡ Generate & Preview", type="primary", width="stretch")
+            generate_btn = st.button("⚡ Generate & Preview", type="primary", use_container_width=True)
         else:
-            if st.button("🔓 Edit Requests", width="stretch"):
+            if st.button("🔓 Edit Requests", use_container_width=True):
                 del st.session_state.lab_roster
                 st.rerun()
             generate_btn = False
@@ -60,20 +65,41 @@ def render_interactive_roster_lab(mgr: BusinessManager, company_id: str,
                     is_temporary=True
                 ))
             
-            def_reqs = {}
-            for t in teams:
-                if "CASHIER" in t.name.upper():
-                    def_reqs[t.id] = 1
-                elif "SERVICE" in t.name.upper():
-                    def_reqs[t.id] = 3
+            # --- DYNAMIC STAFFING REQUIREMENTS ---
+            # Fetch base constraints (STAFFING_GOAL) to build DailyRequirement
+            base_constraints = mgr.load_constraints(company_id)
             
-            reqs = [
-                DailyRequirement(
-                    date=d,
-                    blocks=[ShiftBlock(start_hour=h, team_requirements=def_reqs) for h in [0, 4, 8, 12, 16, 20]]
-                )
-                for d in dates
-            ]
+            reqs = []
+            for d in dates:
+                daily_blocks = []
+                for h_idx in range(6): # 6 blocks of 4 hours
+                    team_reqs = {}
+                    for t in teams:
+                        # Find the staffing goal for this team/block/date
+                        target_val = 0
+                        # Check constraints for specific requirements
+                        for c in base_constraints:
+                            if c.primitive == ConstraintPrimitive.STAFFING_GOAL and c.team_id == t.id:
+                                # Prioritize specific date/block matches
+                                if c.date == d and c.block_index == h_idx:
+                                    target_val = c.value; break
+                                elif c.date == d and c.block_index is None:
+                                    target_val = c.value
+                                elif c.date is None and c.block_index == h_idx:
+                                    target_val = c.value
+                                elif c.date is None and c.block_index is None:
+                                    target_val = c.value
+                        
+                        # Fallback to sensible defaults if no constraint found
+                        if target_val == 0:
+                            if "CASHIER" in t.name.upper(): target_val = 1
+                            elif "SERVICE" in t.name.upper(): target_val = 2
+                            
+                        team_reqs[t.id] = target_val
+                    
+                    daily_blocks.append(ShiftBlock(start_hour=h_idx*4, team_requirements=team_reqs))
+                
+                reqs.append(DailyRequirement(date=d, blocks=daily_blocks))
             
             solver = ShiftManagerSolver(employees, reqs, all_constraints + req_constraints, teams=teams)
             result, score = solver.solve()

@@ -143,11 +143,31 @@ def render_active_roster(mgr: BusinessManager, company_id: str, employees: List,
         
         leaver_emp = next(e for e in employees if e.id == ts['emp_id'])
         leaver_team_name = next((t.name for t in teams if t.id == leaver_emp.team_id), "").upper()
-        required_count = 1 if "CASHIER" in leaver_team_name else 3
         
         # Calculate staffing for first/last blocks
         start_b, end_b = remaining_blocks[0], remaining_blocks[-1]
         
+        # --- DYNAMIC STAFFING REQUIREMENTS ---
+        # Fetch base constraints (STAFFING_GOAL) to determine the actual target
+        base_constraints = mgr.load_constraints(company_id)
+        target_date_obj = date.fromisoformat(ts['date_str'])
+        
+        def get_required_count(b_idx):
+            target_val = 0
+            for c in base_constraints:
+                if c.primitive == ConstraintPrimitive.STAFFING_GOAL and c.team_id == leaver_emp.team_id:
+                    if c.date == target_date_obj and c.block_index == b_idx:
+                        target_val = c.value; break
+                    elif c.date == target_date_obj and c.block_index is None:
+                        target_val = c.value
+                    elif c.date is None and c.block_index == b_idx:
+                        target_val = c.value
+                    elif c.date is None and c.block_index is None:
+                        target_val = c.value
+            if target_val == 0:
+                target_val = 1 if "CASHIER" in leaver_team_name else 2
+            return target_val
+
         def get_staff_count(b_idx):
             ids = [eid for eid, blks in current_day_data.items() if b_idx in blks]
             return len([e for e in employees if e.id in ids and e.team_id == leaver_emp.team_id])
@@ -156,11 +176,21 @@ def render_active_roster(mgr: BusinessManager, company_id: str, employees: List,
         # OPTION 1: Leave without Replacement
         # ---------------------------------------------------------
         st.write("### 1️⃣ Option 1: Leave without Replacement")
-        min_staff = min(get_staff_count(b) for b in remaining_blocks)
-        if min_staff <= 1:
-            st.warning(f"⚠️ **CRITICAL**: Staffing will drop to {min_staff-1} in some blocks!")
-        elif min_staff <= required_count:
-            st.info(f"💡 Low staffing warning: {min_staff-1} remaining (Ideal: {required_count})")
+        
+        # Check impact across all leaver blocks
+        min_staff_after = 999
+        min_req = 0
+        for b in remaining_blocks:
+            after = get_staff_count(b) - 1
+            req = get_required_count(b)
+            if after < min_staff_after:
+                min_staff_after = after
+                min_req = req
+            
+        if min_staff_after < 1:
+            st.warning(f"⚠️ **CRITICAL**: Staffing will drop to ZERO in some blocks!")
+        elif min_staff_after < min_req:
+            st.info(f"💡 Low staffing warning: {min_staff_after} remaining (Required: {min_req})")
             
         if st.button("✅ Approve (No Cover)", key="opt1_btn", width="stretch"):
             try:

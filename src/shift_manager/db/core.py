@@ -3,17 +3,41 @@ import json
 from datetime import datetime, date
 from typing import List, Optional, Dict, Any
 
+from contextlib import contextmanager
+
 class BaseRepository:
     def __init__(self, db_path: str = "roster_memory.db"):
         self.db_path = db_path
+        self._init_wal_mode()
 
-    def _date_to_str(self, date_obj: date) -> str:
-        return date_obj.isoformat() if isinstance(date_obj, date) else str(date_obj)
+    def _init_wal_mode(self):
+        """Enable WAL mode for better concurrency."""
+        with self.connection() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+
+    @contextmanager
+    def connection(self):
+        """Standardized connection context manager."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _date_to_str(self, date_obj: Any) -> str:
+        if isinstance(date_obj, (date, datetime)):
+            return date_obj.isoformat()[:10]
+        return str(date_obj)[:10]
 
     def _init_schema(self):
         """Initialize all tables for the unified schema."""
-        conn = sqlite3.connect(self.db_path)
-        try:
+        with self.connection() as conn:
             cursor = conn.cursor()
             # === CORE MASTER DATA ===
             cursor.execute("""
@@ -171,7 +195,4 @@ class BaseRepository:
                     FOREIGN KEY (employee_id) REFERENCES employees(id)
                 )
             """)
-            conn.commit()
-        finally:
-            conn.close()
 

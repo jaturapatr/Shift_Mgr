@@ -7,83 +7,70 @@ from shift_manager.db.core import BaseRepository
 class CompanyRepository(BaseRepository):
     def create_company(self, company: Company) -> Company:
         """Create a new company."""
-        conn = sqlite3.connect(self.db_path)
-        try:
-            cursor = conn.cursor()
-            created_at = datetime.now().isoformat()
-            cursor.execute("""
+        with self.connection() as conn:
+            created_at = self._date_to_str(datetime.now())
+            conn.execute("""
                 INSERT OR REPLACE INTO companies (id, name, natural_language_context, created_at)
                 VALUES (?, ?, ?, ?)
             """, (company.id, company.name, company.natural_language_context, created_at))
-            conn.commit()
             return company
-        finally:
-            conn.close()
 
     def get_company(self, company_id: str) -> Optional[Company]:
         """Get a company by ID."""
-        conn = sqlite3.connect(self.db_path)
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM companies WHERE id = ?", (company_id,))
+        with self.connection() as conn:
+            cursor = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,))
             row = cursor.fetchone()
             if row:
-                return Company(id=row[0], name=row[1], natural_language_context=row[2])
+                return Company(
+                    id=row['id'], 
+                    name=row['name'], 
+                    natural_language_context=row['natural_language_context']
+                )
             return None
-        finally:
-            conn.close()
 
     def get_all_companies(self) -> List[Company]:
         """Get all companies."""
-        conn = sqlite3.connect(self.db_path)
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM companies")
-            return [Company(id=row[0], name=row[1], natural_language_context=row[2]) for row in cursor.fetchall()]
-        finally:
-            conn.close()
+        with self.connection() as conn:
+            cursor = conn.execute("SELECT * FROM companies")
+            return [
+                Company(
+                    id=row['id'], 
+                    name=row['name'], 
+                    natural_language_context=row['natural_language_context']
+                ) for row in cursor.fetchall()
+            ]
 
     def update_company_context(self, company_id: str, context: str):
         """Update natural language context for a company."""
-        conn = sqlite3.connect(self.db_path)
-        try:
-            cursor = conn.cursor()
-            cursor.execute("UPDATE companies SET natural_language_context = ? WHERE id = ?", (context, company_id))
-            conn.commit()
-        finally:
-            conn.close()
+        with self.connection() as conn:
+            conn.execute(
+                "UPDATE companies SET natural_language_context = ? WHERE id = ?", 
+                (context, company_id)
+            )
 
     def create_team(self, team: Team) -> Team:
         """Create a new team."""
-        conn = sqlite3.connect(self.db_path)
-        try:
-            cursor = conn.cursor()
-            created_at = datetime.now().isoformat()
-            cursor.execute("""
+        with self.connection() as conn:
+            created_at = self._date_to_str(datetime.now())
+            conn.execute("""
                 INSERT OR REPLACE INTO teams (id, company_id, name, created_at)
                 VALUES (?, ?, ?, ?)
             """, (team.id, team.company_id, team.name, created_at))
-            conn.commit()
             return team
-        finally:
-            conn.close()
 
     def get_teams(self, company_id: str) -> List[Team]:
         """Get all teams for a company."""
-        conn = sqlite3.connect(self.db_path)
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM teams WHERE company_id = ?", (company_id,))
-            return [Team(id=row[0], company_id=row[1], name=row[2]) for row in cursor.fetchall()]
-        finally:
-            conn.close()
+        with self.connection() as conn:
+            cursor = conn.execute("SELECT * FROM teams WHERE company_id = ?", (company_id,))
+            return [
+                Team(
+                    id=row['id'], 
+                    company_id=row['company_id'], 
+                    name=row['name']
+                ) for row in cursor.fetchall()
+            ]
 
     def delete_team(self, team_id: str):
         """Delete a team."""
-        conn = sqlite3.connect(self.db_path)
-        try:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM teams WHERE id = ?", (team_id,))
-            conn.commit()
-        finally:
-            conn.close()
+        with self.connection() as conn:
+            conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))

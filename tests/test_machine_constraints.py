@@ -143,7 +143,7 @@ class TestMachineConstraintModel:
         ops = list(ConstraintOp)
         units = list(ConstraintUnit)
         
-        assert len(primitives) == 6
+        assert len(primitives) == 7
         assert len(ops) == 3
         assert len(units) == 2
 

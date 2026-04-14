@@ -1,0 +1,45 @@
+✦ The program logic for the Constraint Translator follows a structured pipeline that transforms vague human language
+  into mathematically precise OR-Tools primitives. Here is the step-by-step flow:
+
+  1. The Input Phase (Streamlit UI)
+   * User Action: You type a request in the "Logic Command Center" (e.g., "Service A and Service F cannot work
+     together").
+   * Context Gathering: Before sending anything to the LLM, the UI (in constraints.py) pulls the Real-Time Data
+     Dictionary from the database:
+       * Employees: Full list of names and their unique IDs (UUID-SA-123).
+       * Teams: Active roles like CASHIER or SERVICE.
+       * Current Stack: The existing rules already in constraints.json.
+
+  2. The Agent Logic Phase (LLMTranslator.py)
+  This is where the "Skill" and "Tools" concept is applied:
+   * The Skill (System Prompt): The LLM is given a high-priority persona (CP-SAT Logic Engineer) and a MANDATE: "Use the
+     provided IDs, distinguish between names and roles, and never invent data."
+   * The Tools (JSON Schema): Instead of asking for raw text, the program provides the LLM with a list of Functions it
+     can "call":
+       * add_preference(employee_id, related_employee_id, preference_type)
+       * set_point_fix(employee_id, date, value)
+       * (and 5 others covering all primitives).
+
+  3. The Execution Phase (Tool Calling)
+   * LLM Decision: The LLM analyzes your text and identifies the specific tool needed. It maps the name "Service A" to
+     the ID UUID-SA-123 using the dictionary.
+   * Response: The LLM returns a Tool Call (e.g., Call add_preference with id="UUID-SA-123", related_id="UUID-SF-456",
+     type="AVOID_TOGETHER").
+   * Program Parsing: The _parse_tool_call method catches this request and converts it into a Python MachineConstraint
+     object.
+
+  4. The Validation & Persistence Phase
+   * Pydantic Validation: The system runs the tool arguments through the MachineConstraint model. If any required fields
+     (like target_type) are missing or the ID is invalid, it catches the error before saving.
+   * Human-in-the-Loop: The UI displays a Preview of what the LLM interpreted.
+   * Save to Disk: Once you click "Confirm & Apply":
+       * The program uses model_dump(exclude_none=True, exclude_defaults=True).
+       * This strips out all the "noise" (nulls and default values).
+       * The resulting clean JSON is written to constraints.json.
+
+  Why this is robust:
+   1. Zero Hallucination: By using Tools instead of raw text, the LLM cannot invent new JSON keys.
+   2. ID Integrity: By using a Metadata Dictionary, "Service A" is always the correct UUID from your DB, never a made-up
+      string.
+   3. Clean Data: The exclude_none logic ensures your constraints.json remains readable and only contains the parameters
+      that actually matter for that specific rule.

@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import json
 from shift_manager.models import (
     Employee, DailyRequirement, ShiftBlock, MachineConstraint, ConstraintPrimitive, 
-    ConstraintOp, ConstraintUnit, StaffingGap, InfeasibilityReport
+    ConstraintOp, ConstraintUnit, ConstraintTargetType, StaffingGap, InfeasibilityReport
 )
 
 # Shared helper for shift string formatting
@@ -62,14 +62,23 @@ class ShiftManagerSolver:
             for b_idx in range(self.blocks_per_day):
                 team_reqs = req.blocks[b_idx].team_requirements if b_idx < len(req.blocks) else {}
                 for team in self.teams:
+                    # Default from DailyRequirement
                     target_val = team_reqs.get(team.id, 0)
                     op = ConstraintOp.GE 
+                    
+                    # Override with dynamic MachineConstraints
                     for c in self.constraints:
                         if c.primitive == ConstraintPrimitive.STAFFING_GOAL and c.team_id == team.id:
+                            # Level 1: Exact Date + Block
                             if c.date == req.date and c.block_index == b_idx:
                                 target_val = c.value; op = c.op or ConstraintOp.GE; break
+                            # Level 2: All Blocks on specific Date
+                            elif c.date == req.date and c.block_index is None:
+                                target_val = c.value; op = c.op or ConstraintOp.GE
+                            # Level 3: Specific Block on All Dates
                             elif c.date is None and c.block_index == b_idx:
                                 target_val = c.value; op = c.op or ConstraintOp.GE
+                            # Level 4: Global (All Dates, All Blocks)
                             elif c.date is None and c.block_index is None:
                                 target_val = c.value; op = c.op or ConstraintOp.GE
 
@@ -99,7 +108,12 @@ class ShiftManagerSolver:
     def _apply_window_limit(self):
         for c in self.constraints:
             if c.primitive == ConstraintPrimitive.WINDOW_LIMIT:
-                for e in self.employees:
+                # Filter employees based on target_type
+                target_emps = self.employees
+                if c.target_type == ConstraintTargetType.EMPLOYEE and c.employee_id:
+                    target_emps = [e for e in self.employees if e.id == c.employee_id]
+                
+                for e in target_emps:
                     if c.unit == ConstraintUnit.BLOCKS:
                         total_blocks = self.days_count * self.blocks_per_day
                         for start in range(total_blocks - c.window_size + 1):
@@ -108,7 +122,10 @@ class ShiftManagerSolver:
                                 block_idx = start + offset
                                 day_idx = block_idx // self.blocks_per_day
                                 within_day = block_idx % self.blocks_per_day
-                                window_vars.append(self.work[e.id, day_idx, within_day])
+                                if (e.id, day_idx, within_day) in self.work:
+                                    window_vars.append(self.work[e.id, day_idx, within_day])
+                            
+                            if not window_vars: continue
                             if c.op == ConstraintOp.LE: self.model.Add(sum(window_vars) <= c.value)
                             elif c.op == ConstraintOp.GE: self.model.Add(sum(window_vars) >= c.value)
                             elif c.op == ConstraintOp.EQ: self.model.Add(sum(window_vars) == c.value)
@@ -117,7 +134,7 @@ class ShiftManagerSolver:
                             working_days_vars = []
                             for d in range(start_day, start_day + c.window_size):
                                 day_worked = self.model.NewBoolVar(f'wd_{e.id}_{d}_{c.policy_id}')
-                                day_sum = sum(self.work[e.id, d, b] for b in range(self.blocks_per_day))
+                                day_sum = sum(self.work[e.id, d, b] for b in range(self.blocks_per_day) if (e.id, d, b) in self.work)
                                 self.model.Add(day_sum >= 1).OnlyEnforceIf(day_worked)
                                 self.model.Add(day_sum == 0).OnlyEnforceIf(day_worked.Not())
                                 working_days_vars.append(day_worked)
@@ -235,6 +252,43 @@ class ShiftManagerSolver:
                     diffs.append(is_diff)
                 self.model.Add(sum(diffs) >= 1).OnlyEnforceIf([worked_d, worked_d_next])
 
+    def _apply_preference(self):
+        """Primitive: PREFERENCE. Handles relational and shift preferences."""
+        for c in self.constraints:
+            if c.primitive != ConstraintPrimitive.PREFERENCE: continue
+            
+            if c.preference_type == "AVOID_TOGETHER" and c.employee_id and c.related_employee_id:
+                # E1 and E2 cannot work in the same block
+                for d in range(self.days_count):
+                    for b in range(self.blocks_per_day):
+                        # Use .get() or check existence to avoid KeyErrors if one employee isn't in work dict
+                        if (c.employee_id, d, b) in self.work and (c.related_employee_id, d, b) in self.work:
+                            self.model.Add(self.work[c.employee_id, d, b] + self.work[c.related_employee_id, d, b] <= 1)
+            
+            elif c.preference_type == "MUST_TOGETHER" and c.employee_id and c.related_employee_id:
+                # If E1 works, E2 must work (in the same block)
+                for d in range(self.days_count):
+                    for b in range(self.blocks_per_day):
+                        if (c.employee_id, d, b) in self.work and (c.related_employee_id, d, b) in self.work:
+                            self.model.Add(self.work[c.employee_id, d, b] == self.work[c.related_employee_id, d, b])
+            
+            elif c.preference_type == "AVOID_SHIFT" and c.employee_id and c.team_id:
+                # E1 cannot work any block assigned to shift/team X
+                # Note: Currently AVOID_SHIFT is interpreted as 'cannot work in this role' 
+                # or 'cannot work at all if this is a time-based team'.
+                for d in range(self.days_count):
+                    for b in range(self.blocks_per_day):
+                        if (c.employee_id, d, b) in self.work:
+                            # In our current logic, a person belongs to ONE team. 
+                            # If they are AVOIDING that team, they effectively can't work.
+                            # If team_id refers to a block-time (like NIGHT), we map it.
+                            is_match = False
+                            if "NIGHT" in c.team_id.upper() and b in [4, 5]: is_match = True
+                            if "MORNING" in c.team_id.upper() and b in [0, 1]: is_match = True
+                            
+                            if is_match:
+                                self.model.Add(self.work[c.employee_id, d, b] == 0)
+
     def solve(self):
         if not self.requirements: return {}, 0.0
         self._apply_staffing_goal()
@@ -242,6 +296,7 @@ class ShiftManagerSolver:
         self._apply_window_limit()
         self._apply_minimum_rest_between_days()
         self._apply_no_repeated_shift()
+        self._apply_preference()
         obj = self._get_objective_terms()
         self.model.Minimize(obj)
         solver = cp_model.CpSolver()
@@ -267,6 +322,7 @@ class ShiftManagerSolver:
         self._apply_staffing_goal(relaxed=True)
         self._apply_point_fix()
         self._apply_window_limit()
+        self._apply_preference()
         self.model.Minimize(sum(s for s, req in self.slacks.values()))
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = 10.0
@@ -357,6 +413,11 @@ class ShiftManagerSolver:
         sub_model = cp_model.CpModel()
         team_emps = [e for e in self.employees if e.team_id == team_id and e.id != exclude_id]
         if not team_emps: return None
+        
+        # Find the specific daily requirement
+        day_req = next((r for r in self.requirements if r.date == target_date), None)
+        if not day_req: return None
+
         vars = {}
         for e in team_emps:
             for b in range(self.blocks_per_day): vars[e.id, b] = sub_model.NewBoolVar(f'rebal_{e.id}_{b}')
@@ -364,11 +425,15 @@ class ShiftManagerSolver:
             sub_model.Add(sum(vars[e.id, b] for b in range(self.blocks_per_day)) <= 3)
             for b in range(self.blocks_per_day - 2):
                 sub_model.Add(vars[e.id, b] + vars[e.id, b+2] <= 1).OnlyEnforceIf(vars[e.id, b+1].Not())
-        is_cashier = "CASHIER" in team_id.upper(); target = 1 if is_cashier else 3; d_str = str(target_date)
+        
+        d_str = str(target_date)
         penalties = []
         for b in range(self.blocks_per_day):
+            # Use actual requirement for this team/block
+            target = day_req.blocks[b].team_requirements.get(team_id, 0)
+            
             count = sum(vars[e.id, b] for e in team_emps)
-            slack = sub_model.NewIntVar(0, target, f'slack_{b}')
+            slack = sub_model.NewIntVar(0, max(target, 1), f'slack_{b}')
             sub_model.Add(count + slack >= target)
             penalties.append(slack * 5000)
             for e in team_emps:
